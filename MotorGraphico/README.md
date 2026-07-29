@@ -1,8 +1,9 @@
 # Motor Gráfico Isométrico Pixel Art (C++)
 
 Implementación de `Core::Resources::ResourceManager<T>` y sus dependencias
-(`Result<T>`, `EngineException`), más el arranque de la Fase 1 del Gantt
-(ventana + contexto OpenGL), siguiendo el diagrama de clases del motor
+(`Result<T>`, `EngineException`), el arranque de la Fase 1 del Gantt
+(ventana + contexto OpenGL) y la cámara ortográfica + proyección
+isométrica de esa misma fase, siguiendo el diagrama de clases del motor
 (`motor_grafico_clases.puml`).
 
 ## Estructura
@@ -13,6 +14,7 @@ CMakeLists.txt
 include/Core/Math/Vector2.h             Vector2, del diagrama de clases
 include/Core/Math/GridCoord.h           Coordenada entera de grid
 include/Core/Math/UVRect.h              Region UV de un atlas
+include/Core/Math/IsoMath.h             Proyeccion isometrica 2:1 (grid<->screen), sin GL
 include/Core/Errors/EngineException.h   Jerarquía de excepciones del motor
 include/Core/Errors/Result.h            Result<T>, para operaciones recuperables
 include/Core/Resources/ResourceManager.h  Template base genérico
@@ -21,16 +23,19 @@ include/Core/Resources/TextureManager.h ResourceManager<Texture>
 include/Core/Resources/Shader.h         Wrapper RAII de programa GLSL
 include/Core/Resources/ShaderManager.h  ResourceManager<Shader>
 include/Engine/Window.h                 Ventana + contexto OpenGL 3.3 (GLFW+GLAD)
+include/Render/Camera.h                 Camara ortografica: paneo suavizado, zoom, iso (solo glm)
 
 src/Core/Resources/Texture.cpp
 src/Core/Resources/TextureManager.cpp
 src/Core/Resources/Shader.cpp
 src/Core/Resources/ShaderManager.cpp
 src/Engine/Window.cpp
+src/Render/Camera.cpp
 
 examples/TextAsset.h              Recurso de prueba sin dependencias gráficas
 examples/TextAssetManager.h/.cpp  ResourceManager<TextAsset>
 examples/demo_resource_manager.cpp  Demo/test ejecutable (sin GL)
+examples/demo_camera.cpp             Demo/test de Camera + IsoMath (sin GL, solo glm)
 examples/sandbox_window.cpp          Demo de Window: abre ventana y pinta un color
 
 ```
@@ -48,11 +53,19 @@ ubicados en `.github/workflows/` en la raíz. Ver `../BRANCHING.md`.
   `-fsanitize=address,undefined`, limpio). Cubre: carga OK, cache por
   `id`, error controlado sin excepción visible para el llamador,
   `get()`/`contains()`/`unload()`/`clear()`.
+- **`Camera` (paneo suavizado, zoom, `getViewProjectionMatrix()`,
+  `screenToWorld()`, `worldToGrid()`) e `IsoMath` (proyección 2:1
+  grid↔screen) están compilados y ejecutados** (`demo_camera.cpp`, target
+  `motor_math`, solo depende de `glm` vía `FetchContent`): round-trip
+  `screenToGrid(gridToScreen(g)) == g` exacto en una cuadrícula de prueba
+  de 41×41 celdas, convergencia del lerp de paneo, e inversa exacta de
+  `screenToWorld()` para un zoom≠1. Limpio también con
+  `-fsanitize=address,undefined`, `clang-format` y `clang-tidy`.
 - **`Texture`/`TextureManager`, `Shader`/`ShaderManager` y `Window` son código real** (llamadas GL reales vía GLAD, carga con `stb_image`,
   compilación GLSL con log de error, contexto OpenGL 3.3 Core vía GLFW),
-  pero **no se han podido compilar en este sandbox** porque no tiene
-  GLFW/GLAD/stb_image/glm instalados ni acceso de red para descargarlos.
-  Se revisaron a mano.
+  pero **siguen sin poder compilarse** porque requieren vendorizar GLAD y
+  stb_image a mano (ver más abajo) y no hay forma de crear un contexto
+  OpenGL real (display) en este entorno. Se revisaron a mano.
 
 ### Corrección aplicada: bug de move-semantics en `Texture`
 
@@ -64,16 +77,21 @@ destructores intentarían borrarlo → doble-free / comportamiento
 indefinido. Se sustituyó por un move explícito que "roba" el recurso y
 deja el origen en `m_glID = 0`, igual que `std::unique_ptr`.
 
-## Compilar y ejecutar el demo verificado
+## Compilar y ejecutar los demos verificados
 
 ```
 mkdir build && cd build
 cmake ..
 cmake --build .
 ./demo_resource_manager
+./demo_camera
 ```
 
-Sin `cmake` a mano, también compila directo:
+`demo_camera` descarga `glm` vía `FetchContent` en la configuración de
+CMake (requiere red la primera vez; luego queda cacheado en `build/`).
+
+Sin `cmake` a mano, `demo_resource_manager` también compila directo (no
+tiene dependencias externas):
 
 ```
 g++ -std=c++17 -Wall -Wextra -Iinclude -o demo examples/demo_resource_manager.cpp examples/TextAssetManager.cpp
@@ -94,8 +112,9 @@ g++ -std=c++17 -Wall -Wextra -Iinclude -o demo examples/demo_resource_manager.cp
    <https://raw.githubusercontent.com/nothings/stb/master/stb_image.h>
    en `third_party/stb/stb_image.h`.
 
-GLFW y glm se descargan solos vía `FetchContent` (no requieren paso
-manual). En cuanto los dos pasos anteriores estén hechos:
+GLFW se descarga sola vía `FetchContent` (glm ya se resuelve siempre,
+lo use o no `motor_core`, ver más abajo). En cuanto los dos pasos
+anteriores estén hechos:
 
 ```
 mkdir build && cd build
@@ -107,8 +126,8 @@ cmake --build .
 `sandbox_window` abre una ventana 1280×720, crea el contexto OpenGL 3.3
 Core y pinta un color de fondo sólido cada frame — es la validación
 mínima de la primera tarea de la Fase 1 ("Ventana + contexto OpenGL
-3.3"). Las siguientes tareas de esa fase (quad texturizado, cámara
-ortográfica, grid isométrico de prueba) son el próximo paso.
+3.3"). Ver "Próximo paso sugerido" más abajo para lo que falta de esa
+fase.
 
 ## CI/CD
 
@@ -120,8 +139,12 @@ el modelo de ramas y el versionado.
 
 ## Próximo paso sugerido
 
-Completar la Fase 1 del Gantt sobre `Window`: quad texturizado con
-`GL_NEAREST`, cámara ortográfica con desplazamiento (usando ya
-`Vector2`/`GridCoord`), y un grid isométrico de prueba (array 2D). El
-diagrama de clases (`motor_grafico_clases.puml`) ya especifica `Camera`,
-`SpriteBatch` y `TileMap` para cuando toque esa parte.
+De las cuatro tareas de la Fase 1 del Gantt, quedan:
+
+- ~~Ventana + contexto OpenGL 3.3~~ (`Window`)
+- ~~Cámara ortográfica con desplazamiento~~ (`Camera`, este cambio)
+- ~~Grid isométrico de prueba~~ (`IsoMath`, verificado en `demo_camera.cpp`)
+- **Quad texturizado con `GL_NEAREST`** — el único paso que sí necesita un
+  contexto OpenGL real (`Texture`/`Shader`/`Window` ya existen; falta
+  `SpriteBatch::submit()`/`flush()` del diagrama de clases y vendorizar
+  GLAD + stb_image, ver más abajo).

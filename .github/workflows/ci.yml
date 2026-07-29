@@ -79,14 +79,21 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           python3 - <<'PY'
-          import json, subprocess, sys
+          import json, os, subprocess, sys
+
+          project_root = os.getcwd()
+          own_dirs = tuple(
+              os.path.join(project_root, d) + os.sep for d in ("include", "src", "examples")
+          )
 
           with open("build/compile_commands.json") as f:
               entries = json.load(f)
-          files = sorted({e["file"] for e in entries})
+          # Excluye dependencias de FetchContent (build/_deps/...): solo
+          # nos interesa el codigo propio del proyecto.
+          files = sorted({e["file"] for e in entries if e["file"].startswith(own_dirs)})
 
           if not files:
-              print("Sin ficheros en compile_commands.json, nada que analizar.")
+              print("Sin ficheros propios en compile_commands.json, nada que analizar.")
               sys.exit(0)
 
           print(f"Analizando {len(files)} fichero(s) con clang-tidy:")
