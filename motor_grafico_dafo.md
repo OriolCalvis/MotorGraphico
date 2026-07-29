@@ -1,37 +1,123 @@
-# Análisis DAFO — Motor Gráfico Isométrico Pixel Art (C++)
+# Motor Gráfico Isométrico Pixel Art (C++)
 
-## Fortalezas (interno / positivo)
-- C++17 con templates y RAII: rendimiento predecible y gestión de memoria segura sin recolector de basura.
-- Arquitectura modular clara (Errores, Recursos, Render, Motor) que facilita añadir nuevos sistemas sin romper los existentes.
-- OpenGL 3.3 Core es ampliamente compatible (Windows, Linux, y macOS hasta su deprecación) y bien documentado.
-- El estilo pixel art con paleta limitada reduce drásticamente el coste de producción artística frente a 3D o 2D de alta resolución.
-- Al ser un motor propio, es reutilizable como base para múltiples juegos roguelike futuros, amortizando la inversión inicial.
-- `ResourceManager<T>` genérico evita duplicar código entre gestores de texturas, shaders u otros recursos futuros.
+Implementación de `Core::Resources::ResourceManager<T>` y sus dependencias
+(`Result<T>`, `EngineException`), más el arranque de la Fase 1 del Gantt
+(ventana + contexto OpenGL), siguiendo el diagrama de clases del motor
+(`motor_grafico_clases.puml`).
 
-## Debilidades (interno / negativo)
-- Curva de aprendizaje alta en programación gráfica de bajo nivel (OpenGL, shaders, gestión manual de buffers).
-- Dependencia de herramientas externas para edición de mapas (Tiled) al no existir editor propio en las primeras fases.
-- Equipo probablemente pequeño (uno o pocos desarrolladores), lo que alarga los tiempos frente a las estimaciones optimistas del Gantt.
-- Alcance inicial sin sistema de físicas, red o audio: cualquier juego real necesitará estos sistemas más adelante.
-- Los diagramas de render y el propio motor son difíciles de testear con pruebas unitarias automáticas (mucho es visual).
-- El sistema mixto de errores (excepciones + `Result<T>`) exige disciplina para no mezclar criterios de cuándo usar cada uno.
+## Estructura
 
-## Oportunidades (externo / positivo)
-- Comunidad activa e ilusionada con roguelikes y pixel art, con nichos de jugadores fieles (r/roguelikes, itch.io, etc.).
-- Bibliotecas maduras y gratuitas (GLFW, GLAD, stb_image, glm) que cubren gran parte de la infraestructura de bajo nivel.
-- Posibilidad de publicar el motor como open source, atrayendo colaboradores y feedback técnico externo.
-- Reutilización directa en futuras game jams o prototipos, reduciendo el coste marginal de cada nuevo juego.
-- Formato de mapas TMX (Tiled) es un estándar de facto, lo que facilita herramientas y assets de terceros.
+```
+CMakeLists.txt
 
-## Amenazas (externo / negativo)
-- Motores generalistas ya maduros (Godot, LÖVE2D, Unity 2D) resuelven gran parte de este problema con mucho menos esfuerzo de desarrollo.
-- OpenGL está deprecado en macOS y su soporte a largo plazo en plataformas Apple es incierto (alternativa: MoltenVK/Metal).
-- "Feature creep": la fase 4 (iluminación, niebla de guerra, paletizado) puede expandirse indefinidamente y retrasar un prototipo jugable.
-- Dependencia de mantenimiento de bibliotecas de terceros que podrían quedar obsoletas o sin soporte.
-- Riesgo de sobre-ingeniería: la combinación de templates + excepciones + `Result<T>` puede complicar el código más de lo necesario para un motor pequeño.
+include/Core/Math/Vector2.h             Vector2, del diagrama de clases
+include/Core/Math/GridCoord.h           Coordenada entera de grid
+include/Core/Math/UVRect.h              Region UV de un atlas
+include/Core/Errors/EngineException.h   Jerarquía de excepciones del motor
+include/Core/Errors/Result.h            Result<T>, para operaciones recuperables
+include/Core/Resources/ResourceManager.h  Template base genérico
+include/Core/Resources/Texture.h        Wrapper RAII de textura GL
+include/Core/Resources/TextureManager.h ResourceManager<Texture>
+include/Core/Resources/Shader.h         Wrapper RAII de programa GLSL
+include/Core/Resources/ShaderManager.h  ResourceManager<Shader>
+include/Engine/Window.h                 Ventana + contexto OpenGL 3.3 (GLFW+GLAD)
 
-## Lectura estratégica rápida
-| | Ayuda | Perjudica |
-|---|---|---|
-| **Interno** | Fortalezas → aprovechar la modularidad y los templates como argumento de venta técnica | Debilidades → mitigar con documentación y tests de integración tempranos (Fase 5) |
-| **Externo** | Oportunidades → publicar como open source y apoyarse en Tiled/glm | Amenazas → fijar un alcance mínimo viable (Fases 1-3) antes de tocar la Fase 4 opcional |
+src/Core/Resources/Texture.cpp
+src/Core/Resources/TextureManager.cpp
+src/Core/Resources/Shader.cpp
+src/Core/Resources/ShaderManager.cpp
+src/Engine/Window.cpp
+
+examples/TextAsset.h              Recurso de prueba sin dependencias gráficas
+examples/TextAssetManager.h/.cpp  ResourceManager<TextAsset>
+examples/demo_resource_manager.cpp  Demo/test ejecutable (sin GL)
+examples/sandbox_window.cpp          Demo de Window: abre ventana y pinta un color
+
+.github/workflows/ci.yml       (antes en la raíz: GitHub Actions solo ejecuta
+.github/workflows/release.yml   workflows dentro de .github/workflows/)
+```
+
+## Qué está verificado y qué no
+
+- **`ResourceManager<T>`, `Result<T>`, `EngineException`, y el ejemplo `TextAssetManager`/`demo_resource_manager.cpp` están compilados y
+  ejecutados** en este mismo entorno (g++ 13, `-std=c++17 -Wall -Wextra`,
+  cero warnings, todos los `assert()` pasan; también verificado con
+  `-fsanitize=address,undefined`, limpio). Cubre: carga OK, cache por
+  `id`, error controlado sin excepción visible para el llamador,
+  `get()`/`contains()`/`unload()`/`clear()`.
+- **`Texture`/`TextureManager`, `Shader`/`ShaderManager` y `Window` son código real** (llamadas GL reales vía GLAD, carga con `stb_image`,
+  compilación GLSL con log de error, contexto OpenGL 3.3 Core vía GLFW),
+  pero **no se han podido compilar en este sandbox** porque no tiene
+  GLFW/GLAD/stb_image/glm instalados ni acceso de red para descargarlos.
+  Se revisaron a mano.
+
+### Corrección aplicada: bug de move-semantics en `Texture`
+
+El `Texture(Texture&&) = default` original **no** pone a cero `m_glID` en
+el objeto de origen. Como el destructor llama a `glDeleteTextures(m_glID)`
+sin comprobar más que `!= 0`, tras un move ambos objetos (el movido-desde
+y el destino) creían poseer el mismo nombre de textura GL: los dos
+destructores intentarían borrarlo → doble-free / comportamiento
+indefinido. Se sustituyó por un move explícito que "roba" el recurso y
+deja el origen en `m_glID = 0`, igual que `std::unique_ptr`.
+
+## Compilar y ejecutar el demo verificado
+
+```
+mkdir build && cd build
+cmake ..
+cmake --build .
+./demo_resource_manager
+```
+
+Sin `cmake` a mano, también compila directo:
+
+```
+g++ -std=c++17 -Wall -Wextra -Iinclude -o demo examples/demo_resource_manager.cpp examples/TextAssetManager.cpp
+./demo
+```
+
+## Activar `motor_core` (Texture/Shader/Window) y `sandbox_window`
+
+`CMakeLists.txt` los activa **automáticamente** en cuanto detecta:
+
+1. **GLAD**: generar en <https://glad.dav1d.de/> con Language=C/C++,
+   Specification=OpenGL, API gl=3.3, Profile=Core. Descomprimir en
+   `third_party/glad/` de forma que quede
+   `third_party/glad/include/glad/glad.h`,
+   `third_party/glad/include/KHR/khrplatform.h`,
+   `third_party/glad/src/glad.c`.
+2. **stb_image**: descargar
+   <https://raw.githubusercontent.com/nothings/stb/master/stb_image.h>
+   en `third_party/stb/stb_image.h`.
+
+GLFW y glm se descargan solos vía `FetchContent` (no requieren paso
+manual). En cuanto los dos pasos anteriores estén hechos:
+
+```
+mkdir build && cd build
+cmake ..
+cmake --build .
+./sandbox_window
+```
+
+`sandbox_window` abre una ventana 1280×720, crea el contexto OpenGL 3.3
+Core y pinta un color de fondo sólido cada frame — es la validación
+mínima de la primera tarea de la Fase 1 ("Ventana + contexto OpenGL
+3.3"). Las siguientes tareas de esa fase (quad texturizado, cámara
+ortográfica, grid isométrico de prueba) son el próximo paso.
+
+## CI/CD
+
+`ci.yml` y `release.yml` estaban en la raíz del repositorio: GitHub
+Actions **solo** ejecuta workflows que viven en `.github/workflows/`, así
+que nunca se habían disparado. Se movieron a esa ruta sin cambiar su
+contenido. Ver `BRANCHING.md` para el detalle de qué hace cada uno.
+
+## Próximo paso sugerido
+
+Completar la Fase 1 del Gantt sobre `Window`: quad texturizado con
+`GL_NEAREST`, cámara ortográfica con desplazamiento (usando ya
+`Vector2`/`GridCoord`), y un grid isométrico de prueba (array 2D). El
+diagrama de clases (`motor_grafico_clases.puml`) ya especifica `Camera`,
+`SpriteBatch` y `TileMap` para cuando toque esa parte.

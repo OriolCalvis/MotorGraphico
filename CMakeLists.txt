@@ -1,27 +1,54 @@
-cmake_minimum_required(VERSION 3.16)
-project(MotorGraficoIsometrico CXX)
+#include "Engine/Window.h"
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+#include "Core/Errors/EngineException.h"
 
-include_directories(${CMAKE_SOURCE_DIR}/include)
+#include <glad/glad.h>
+// GLAD debe incluirse siempre antes que GLFW (o cualquier otro header
+// que arrastre <GL/gl.h>), porque define los prototipos de OpenGL que
+// GLFW espera encontrar ya declarados.
+#include <GLFW/glfw3.h>
 
-# --- Demo sin dependencias externas: prueba ResourceManager<T> de forma
-#     aislada. Compila y pasa en cualquier maquina con g++/clang++ C++17. ---
-add_executable(demo_resource_manager
-    examples/demo_resource_manager.cpp
-    examples/TextAssetManager.cpp
-)
+Window::Window(int width, int height, const std::string& title)
+    : m_width(width), m_height(height) {
+    if (!glfwInit()) {
+        throw EngineException("glfwInit() fallo: no se pudo inicializar GLFW");
+    }
 
-# --- Clases "reales" (Texture/Shader) del diagrama de clases. Necesitan
-#     GLFW + GLAD + stb_image + glm (vendorizados en third_party/ o via
-#     find_package/FetchContent, segun decidais). Descomentar al llegar a
-#     la Fase 1/2 del Gantt. ---
-#
-# add_library(motor_core
-#     src/Core/Resources/Texture.cpp
-#     src/Core/Resources/TextureManager.cpp
-#     src/Core/Resources/Shader.cpp
-#     src/Core/Resources/ShaderManager.cpp
-# )
-# target_link_libraries(motor_core PUBLIC glfw glad glm)
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+    // macOS solo expone OpenGL 3.3+ en perfil "forward compatible".
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#endif
+
+    m_handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    if (!m_handle) {
+        glfwTerminate();
+        throw EngineException(
+            "glfwCreateWindow() fallo: revisa que la GPU/drivers soporten OpenGL 3.3 Core");
+    }
+
+    glfwMakeContextCurrent(m_handle);
+
+    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
+        glfwDestroyWindow(m_handle);
+        glfwTerminate();
+        throw EngineException(
+            "gladLoadGLLoader() fallo: no se pudieron cargar los punteros de funcion de OpenGL");
+    }
+
+    glViewport(0, 0, width, height);
+    glfwSwapInterval(1); // VSync activado por defecto.
+}
+
+Window::~Window() {
+    if (m_handle) {
+        glfwDestroyWindow(m_handle);
+    }
+    glfwTerminate();
+}
+
+bool Window::shouldClose() const { return glfwWindowShouldClose(m_handle) != 0; }
+void Window::pollEvents() const { glfwPollEvents(); }
+void Window::swapBuffers() const { glfwSwapBuffers(m_handle); }

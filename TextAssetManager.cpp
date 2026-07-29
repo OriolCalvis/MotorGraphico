@@ -1,17 +1,51 @@
-#include "TextAssetManager.h"
-#include "Core/Errors/EngineException.h"
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
 
-#include <fstream>
-#include <sstream>
+permissions:
+  contents: write
 
-std::unique_ptr<TextAsset> TextAssetManager::loadFromDisk(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        // Excepcion de dominio: ResourceManager<T>::load() la capturara
-        // y la convertira en Result<T*>::Error.
-        throw ResourceLoadException(path);
-    }
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    return std::make_unique<TextAsset>(ss.str());
-}
+jobs:
+  build-release:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_suffix: linux
+          - os: windows-latest
+            artifact_suffix: win64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configurar CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Compilar
+        run: cmake --build build --config Release
+      - name: Empaquetar (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp build/demo_resource_manager dist/
+          tar -czf motor-iso-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz -C dist .
+      - name: Empaquetar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $exe = Get-ChildItem -Recurse -Filter "demo_resource_manager.exe" build | Select-Object -First 1
+          Copy-Item $exe.FullName dist/
+          Compress-Archive -Path dist/* -DestinationPath "motor-iso-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip"
+      - name: Subir artefacto al Release de GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            motor-iso-*.tar.gz
+            motor-iso-*.zip
+# Nota: hoy el unico ejecutable real del proyecto es demo_resource_manager
+# (sin dependencias graficas). En cuanto el target motor_core (Texture,
+# Shader, ventana GLFW...) este activo en CMakeLists.txt, hay que anadir
+# aqui el binario de la aplicacion real y sus assets minimos al paquete.

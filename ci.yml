@@ -1,97 +1,75 @@
-name: CI
+#include "Core/Resources/Shader.h"
 
-on:
-  push:
-    branches: [ develop, main ]
-  pull_request:
-    branches: [ develop, main ]
+#include "Core/Errors/EngineException.h"
 
-jobs:
-  build-test:
-    name: build (${{ matrix.compiler }}, ${{ matrix.build_type }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        build_type: [Debug, Release]
-        compiler: [g++, clang++]
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
-    steps:
-      - uses: actions/checkout@v4
+#include <vector>
 
-      - name: Instalar dependencias
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang
+unsigned int Shader::compileStage(unsigned int glShaderType, const std::string& source) {
+    unsigned int id = glCreateShader(glShaderType);
+    const char* src = source.c_str();
+    glShaderSource(id, 1, &src, nullptr);
+    glCompileShader(id);
 
-      - name: Configurar CMake
-        env:
-          CXX: ${{ matrix.compiler }}
-        run: >
-          cmake -B build
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    int compiled = 0;
+    glGetShaderiv(id, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        int logLen = 0;
+        glGetShaderiv(id, GL_INFO_LOG_LENGTH, &logLen);
+        std::vector<char> log(static_cast<std::size_t>(logLen));
+        glGetShaderInfoLog(id, logLen, nullptr, log.data());
+        glDeleteShader(id);
+        throw ShaderCompileException(std::string(log.data(), log.size()));
+    }
+    return id;
+}
 
-      - name: Compilar
-        run: cmake --build build --config ${{ matrix.build_type }}
+Shader::Shader(const std::string& vertexSource, const std::string& fragmentSource) {
+    unsigned int vs = compileStage(GL_VERTEX_SHADER, vertexSource);
+    unsigned int fs = compileStage(GL_FRAGMENT_SHADER, fragmentSource);
 
-      - name: Ejecutar demo (ResourceManager<T>)
-        run: ./build/demo_resource_manager
+    m_programID = glCreateProgram();
+    glAttachShader(m_programID, vs);
+    glAttachShader(m_programID, fs);
+    glLinkProgram(m_programID);
 
-      # Solo una combinacion para no triplicar el tiempo de CI: los
-      # sanitizers son sobre todo utiles para detectar UB/fugas de memoria
-      # en Debug, y g++ y clang++ comparten el mismo codigo fuente.
-      - name: Compilar y ejecutar con ASan + UBSan
-        if: matrix.build_type == 'Debug' && matrix.compiler == 'g++'
-        run: |
-          cmake -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
-          cmake --build build-sanitize
-          ./build-sanitize/demo_resource_manager
+    int linked = 0;
+    glGetProgramiv(m_programID, GL_LINK_STATUS, &linked);
 
-  static-analysis:
-    name: Formato y análisis estático
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    // Los stages individuales ya se pueden marcar para borrado en cuanto
+    // se adjuntan al programa; GL los libera de verdad al hacer
+    // glDeleteProgram si el link falla.
+    glDeleteShader(vs);
+    glDeleteShader(fs);
 
-      - name: Instalar herramientas
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format clang-tidy cppcheck cmake
+    if (!linked) {
+        int logLen = 0;
+        glGetProgramiv(m_programID, GL_INFO_LOG_LENGTH, &logLen);
+        std::vector<char> log(static_cast<std::size_t>(logLen));
+        glGetProgramInfoLog(m_programID, logLen, nullptr, log.data());
+        glDeleteProgram(m_programID);
+        m_programID = 0;
+        throw ShaderCompileException(std::string(log.data(), log.size()));
+    }
+}
 
-      - name: Comprobar clang-format
-        run: |
-          files=$(find include src examples -name '*.h' -o -name '*.cpp')
-          echo "$files" | xargs clang-format --dry-run --Werror
+Shader::~Shader() {
+    if (m_programID != 0) {
+        glDeleteProgram(m_programID);
+    }
+}
 
-      - name: Generar compile_commands.json
-        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+void Shader::use() const { glUseProgram(m_programID); }
 
-      # Importante: solo analizamos los ficheros que realmente forman
-      # parte del build actual (compile_commands.json). Asi evitamos que
-      # clang-tidy falle sobre Texture.cpp/Shader.cpp, que todavia
-      # dependen de GLAD/stb_image/glm sin vendorizar (ver CMakeLists.txt,
-      # target motor_core comentado). En cuanto esas fuentes se anadan al
-      # build, clang-tidy las cubrira automaticamente sin tocar este job.
-      - name: clang-tidy sobre los ficheros del build actual
-        run: |
-          python3 - <<'PYEOF'
-          import json
-          import subprocess
+void Shader::setUniformInt(const std::string& name, int value) {
+    int loc = glGetUniformLocation(m_programID, name.c_str());
+    glUniform1i(loc, value);
+}
 
-          with open("build/compile_commands.json") as f:
-              entries = json.load(f)
-
-          files = sorted({entry["file"] for entry in entries})
-          if not files:
-              print("No hay ficheros en compile_commands.json, nada que analizar.")
-          else:
-              subprocess.run(["clang-tidy", "-p", "build", *files], check=True)
-          PYEOF
-
-      - name: cppcheck
-        run: >
-          cppcheck --enable=warning,performance,portability
-          --error-exitcode=1 --inline-suppr
-          -I include include src examples
+void Shader::setUniformMat4(const std::string& name, const glm::mat4& mat) {
+    int loc = glGetUniformLocation(m_programID, name.c_str());
+    glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(mat));
+}

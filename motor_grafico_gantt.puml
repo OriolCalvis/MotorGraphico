@@ -1,65 +1,94 @@
-@startgantt
-title Motor Grafico Isometrico Pixel Art - Planificacion (estimacion, jornada L-V)
+cmake_minimum_required(VERSION 3.16)
+project(MotorGraficoIsometrico CXX)
 
-Project starts 2026-08-03
-saturday are closed
-sunday are closed
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
--- Fase 0: Preparacion --
-[Configuracion de entorno (CMake, GLFW, GLAD, glm)] lasts 3 days
-[Estructura base del proyecto] lasts 2 days
-[Configuracion de entorno (CMake, GLFW, GLAD, glm)] -> [Estructura base del proyecto]
+include_directories(${CMAKE_SOURCE_DIR}/include)
 
--- Fase 1: Prototipo minimo --
-[Ventana + contexto OpenGL 3.3] lasts 3 days
-[Quad texturizado con GL_NEAREST] lasts 3 days
-[Camara ortografica con desplazamiento] lasts 4 days
-[Grid isometrico de prueba (array 2D)] lasts 4 days
-[Estructura base del proyecto] -> [Ventana + contexto OpenGL 3.3]
-[Ventana + contexto OpenGL 3.3] -> [Quad texturizado con GL_NEAREST]
-[Quad texturizado con GL_NEAREST] -> [Camara ortografica con desplazamiento]
-[Camara ortografica con desplazamiento] -> [Grid isometrico de prueba (array 2D)]
+# --- Demo sin dependencias externas: prueba ResourceManager<T> de forma
+# aislada. Compila y pasa en cualquier maquina con g++/clang++ C++17. ---
+add_executable(demo_resource_manager
+    examples/demo_resource_manager.cpp
+    examples/TextAssetManager.cpp
+)
 
--- Fase 2: Sistema de mapas y tiles --
-[ResourceManager<T> generico (templates)] lasts 5 days
-[Carga de atlas de tiles] lasts 4 days
-[Sistema de capas del mapa] lasts 5 days
-[Culling y batching estatico] lasts 5 days
-[Parser de mapas (TMX o formato propio)] lasts 5 days
-[Grid isometrico de prueba (array 2D)] -> [ResourceManager<T> generico (templates)]
-[ResourceManager<T> generico (templates)] -> [Carga de atlas de tiles]
-[Carga de atlas de tiles] -> [Sistema de capas del mapa]
-[Sistema de capas del mapa] -> [Culling y batching estatico]
-[Sistema de capas del mapa] -> [Parser de mapas (TMX o formato propio)]
+# --- Fase 1 en adelante: necesitan GLFW + GLAD + stb_image + glm. ---
+#
+# GLFW y glm se descargan solos via FetchContent (ambos tienen soporte
+# CMake oficial, sin pasos manuales).
+#
+# GLAD y stb_image NO se pueden automatizar del todo: GLAD requiere un
+# paso de generacion (no es un simple "git clone") y stb_image es un
+# header-only que hay que descargar una vez. Pasos manuales, una sola
+# vez, antes de poder compilar motor_core:
+#
+#   1) GLAD: ir a https://glad.dav1d.de/, generador con
+#      Language=C/C++, Specification=OpenGL, API gl=3.3, Profile=Core.
+#      Descomprimir el zip resultante dentro de third_party/glad/ de
+#      forma que quede: third_party/glad/include/glad/glad.h,
+#      third_party/glad/include/KHR/khrplatform.h,
+#      third_party/glad/src/glad.c
+#
+#   2) stb_image: descargar
+#      https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
+#      y guardarlo en third_party/stb/stb_image.h
+#      (el propio proyecto necesita un .cpp que haga
+#       #define STB_IMAGE_IMPLEMENTATION antes de incluirlo una unica
+#       vez; ver third_party/stb_image_impl.cpp mas abajo).
+#
+# En cuanto esas dos carpetas existan, "cmake .." detecta motor_core
+# automaticamente: no hace falta tocar este fichero.
 
--- Fase 3: Entidades y animacion --
-[Jerarquia Entity / AnimatedEntity] lasts 4 days
-[Sprite batching dinamico] lasts 4 days
-[Painter's Algorithm de ordenamiento] lasts 3 days
-[Sistema de animacion por frames] lasts 4 days
-[Culling y batching estatico] -> [Jerarquia Entity / AnimatedEntity]
-[Jerarquia Entity / AnimatedEntity] -> [Sprite batching dinamico]
-[Sprite batching dinamico] -> [Painter's Algorithm de ordenamiento]
-[Painter's Algorithm de ordenamiento] -> [Sistema de animacion por frames]
+set(GLAD_DIR ${CMAKE_SOURCE_DIR}/third_party/glad)
+set(STB_DIR ${CMAKE_SOURCE_DIR}/third_party/stb)
 
--- Fase 4: Pulido visual (opcional) --
-[Iluminacion por fragment shader] lasts 5 days
-[Mapa de luz + niebla de guerra] lasts 5 days
-[Paletizado / LUT de color] lasts 3 days
-[Transiciones de camara y zoom] lasts 3 days
-[Sistema de animacion por frames] -> [Iluminacion por fragment shader]
-[Iluminacion por fragment shader] -> [Mapa de luz + niebla de guerra]
-[Mapa de luz + niebla de guerra] -> [Paletizado / LUT de color]
-[Paletizado / LUT de color] -> [Transiciones de camara y zoom]
+if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
+    include(FetchContent)
 
--- Fase 5: Robustez y cierre --
-[Jerarquia de excepciones EngineException] lasts 3 days
-[Result<T> en rutas criticas del bucle] lasts 3 days
-[Pruebas de integracion] lasts 4 days
-[Documentacion tecnica] lasts 3 days
-[Transiciones de camara y zoom] -> [Jerarquia de excepciones EngineException]
-[Jerarquia de excepciones EngineException] -> [Result<T> en rutas criticas del bucle]
-[Result<T> en rutas criticas del bucle] -> [Pruebas de integracion]
-[Pruebas de integracion] -> [Documentacion tecnica]
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_Declare(
+        glm
+        GIT_REPOSITORY https://github.com/g-truc/glm.git
+        GIT_TAG 1.0.1
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(glfw glm)
 
-@endgantt
+    # third_party/stb_image_impl.cpp: unico .cpp del proyecto donde se
+    # define STB_IMAGE_IMPLEMENTATION (stb_image.h es header-only y esa
+    # macro debe aparecer en una unica unidad de compilacion).
+    file(WRITE ${CMAKE_BINARY_DIR}/stb_image_impl.cpp
+        "#define STB_IMAGE_IMPLEMENTATION\n#include <stb_image.h>\n")
+
+    add_library(motor_core
+        src/Core/Resources/Texture.cpp
+        src/Core/Resources/TextureManager.cpp
+        src/Core/Resources/Shader.cpp
+        src/Core/Resources/ShaderManager.cpp
+        src/Engine/Window.cpp
+        ${GLAD_DIR}/src/glad.c
+        ${CMAKE_BINARY_DIR}/stb_image_impl.cpp
+    )
+    target_include_directories(motor_core PUBLIC
+        ${GLAD_DIR}/include
+        ${STB_DIR}
+    )
+    target_link_libraries(motor_core PUBLIC glfw glm::glm)
+
+    add_executable(sandbox_window examples/sandbox_window.cpp)
+    target_link_libraries(sandbox_window PRIVATE motor_core)
+else ()
+    message(STATUS
+        "motor_core / sandbox_window omitidos: falta third_party/glad y/o "
+        "third_party/stb (ver instrucciones en CMakeLists.txt). "
+        "demo_resource_manager sigue disponible sin ellos.")
+endif ()

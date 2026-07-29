@@ -1,66 +1,49 @@
-#pragma once
+#include "TextAssetManager.h"
 
-#include <stdexcept>
-#include <string>
-#include <utility>
+#include <cassert>
+#include <fstream>
+#include <iostream>
 
-// Result<T> representa el resultado de una operacion que puede fallar de
-// forma "esperable" (fichero no encontrado, formato invalido, etc.).
-//
-// Se usa para I/O y carga de recursos (ResourceManager<T>::load,
-// TileMap::loadFromFile...), donde el fallo es una parte normal del flujo
-// y el llamador SIEMPRE debe comprobarlo con isOk() antes de leer value().
-//
-// No se usa en el bucle de render por-frame: ahi los errores son o bien
-// invisibles para el llamador en Release (ver nota en IsometricRenderer)
-// o fatales (EngineException / RenderException).
-//
-// Limitacion conocida: T debe ser default-construible (T m_value{}).
-// Para tipos que no lo sean, la alternativa es envolver el valor en un
-// std::optional<T> internamente; no se ha hecho aqui para no anadir
-// complejidad que el motor no necesita todavia.
-template <typename T>
-class Result {
-public:
-    static Result<T> Ok(T value) {
-        Result<T> r;
-        r.m_success = true;
-        r.m_value = std::move(value);
-        return r;
+int main() {
+    // Preparar un fichero de prueba en disco.
+    {
+        std::ofstream out("demo_asset.txt");
+        out << "Hola desde ResourceManager<T>!";
     }
 
-    static Result<T> Error(std::string message) {
-        Result<T> r;
-        r.m_success = false;
-        r.m_errorMsg = std::move(message);
-        return r;
-    }
+    TextAssetManager manager;
 
-    bool isOk() const { return m_success; }
-    explicit operator bool() const { return m_success; }
+    // Caso 1: carga exitosa.
+    auto result = manager.load("saludo", "demo_asset.txt");
+    assert(result.isOk());
+    std::cout << "[OK] Cargado 'saludo': " << result.value()->content() << "\n";
 
-    T& value() {
-        if (!m_success) {
-            throw std::logic_error(
-                "Result<T>::value() llamado sobre un Error sin comprobar isOk(): " + m_errorMsg);
-        }
-        return m_value;
-    }
+    // Caso 2: pedir el mismo id devuelve el recurso cacheado sin releer disco
+    // (la ruta pasada aqui ni siquiera existe, y aun asi funciona).
+    auto cached = manager.load("saludo", "ruta_que_no_existe.txt");
+    assert(cached.isOk());
+    assert(cached.value() == result.value()); // mismo puntero: viene de cache
+    std::cout << "[CACHE] count() tras segunda peticion = " << manager.count()
+               << " (esperado: 1)\n";
 
-    const T& value() const {
-        if (!m_success) {
-            throw std::logic_error(
-                "Result<T>::value() llamado sobre un Error sin comprobar isOk(): " + m_errorMsg);
-        }
-        return m_value;
-    }
+    // Caso 3: fichero inexistente -> Result::Error controlado, sin excepcion
+    // visible para quien llama a load().
+    auto missing = manager.load("inexistente", "no_existe.txt");
+    assert(!missing.isOk());
+    std::cout << "[OK esperado] Error controlado: " << missing.errorMessage() << "\n";
 
-    const std::string& errorMessage() const { return m_errorMsg; }
+    // Caso 4: get() / contains() / unload() / clear().
+    TextAsset* ptr = manager.get("saludo");
+    std::cout << "[GET] get(\"saludo\") != nullptr: " << (ptr != nullptr) << "\n";
+    std::cout << "[CONTAINS] contains(\"inexistente\") = "
+               << manager.contains("inexistente") << " (esperado: 0, el load fallido no cachea)\n";
 
-private:
-    Result() = default;
+    manager.unload("saludo");
+    std::cout << "[UNLOAD] count() tras unload = " << manager.count() << " (esperado: 0)\n";
 
-    bool m_success = false;
-    T m_value{};
-    std::string m_errorMsg;
-};
+    manager.clear();
+    std::cout << "[CLEAR] count() tras clear = " << manager.count() << " (esperado: 0)\n";
+
+    std::cout << "\nTodas las comprobaciones (assert) han pasado correctamente.\n";
+    return 0;
+}
