@@ -54,11 +54,12 @@ jobs:
           ./build/demo_resource_manager
           ./build/demo_camera
           ./build/demo_tilemap
-          # demo_textured_quad abre una ventana real (GLFW+GLAD): xvfb-run
-          # le da un display virtual. "5" = corre 5 frames y sale solo
-          # (ver examples/demo_textured_quad.cpp), no se queda colgado
-          # esperando que alguien cierre la ventana.
+          # demo_textured_quad/demo_isometric_renderer abren una ventana
+          # real (GLFW+GLAD): xvfb-run le da un display virtual. "5" =
+          # corren 5 frames y salen solos (ver examples/*.cpp), no se
+          # quedan colgados esperando que alguien cierre la ventana.
           xvfb-run -a ./build/demo_textured_quad 5
+          xvfb-run -a ./build/demo_isometric_renderer 5
 
       - name: Build + run with AddressSanitizer/UBSan (Debug + g++ only)
         if: matrix.build_type == 'Debug' && matrix.compiler == 'g++'
@@ -83,6 +84,7 @@ jobs:
           # proyecto). El resto de demos no tocan GL de verdad y se
           # siguen comprobando con deteccion de fugas activada.
           ASAN_OPTIONS=detect_leaks=0 xvfb-run -a ./build-asan/demo_textured_quad 5
+          ASAN_OPTIONS=detect_leaks=0 xvfb-run -a ./build-asan/demo_isometric_renderer 5
 
   static-analysis:
     name: static-analysis

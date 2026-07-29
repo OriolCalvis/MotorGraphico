@@ -2,7 +2,10 @@
 
 #include "Core/Errors/EngineException.h"
 #include "Core/Math/IsoMath.h"
+#include "Render/Camera.h"
 
+#include <algorithm>
+#include <array>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -190,4 +193,37 @@ GridCoord TileMap::screenToGrid(const Vector2& screenPos) const {
 Vector2 TileMap::gridToScreen(const GridCoord& grid) const {
     return IsoMath::gridToScreen(grid, static_cast<float>(m_tileWidth),
                                  static_cast<float>(m_tileHeight));
+}
+
+GridBounds TileMap::visibleRange(const Camera& camera) const {
+    if (m_width <= 0 || m_height <= 0) {
+        return GridBounds{};  // mapa vacio (sin loadFromFile() todavia): rango vacio
+    }
+
+    const std::array<Vector2, 4> corners = {
+        camera.screenToWorld(Vector2{0.0f, 0.0f}),
+        camera.screenToWorld(Vector2{static_cast<float>(camera.viewportWidth()), 0.0f}),
+        camera.screenToWorld(Vector2{0.0f, static_cast<float>(camera.viewportHeight())}),
+        camera.screenToWorld(Vector2{static_cast<float>(camera.viewportWidth()),
+                                     static_cast<float>(camera.viewportHeight())}),
+    };
+
+    int minX = screenToGrid(corners[0]).x;
+    int maxX = minX;
+    int minY = screenToGrid(corners[0]).y;
+    int maxY = minY;
+    for (int i = 1; i < 4; ++i) {
+        GridCoord g = screenToGrid(corners[i]);
+        minX = std::min(minX, g.x);
+        maxX = std::max(maxX, g.x);
+        minY = std::min(minY, g.y);
+        maxY = std::max(maxY, g.y);
+    }
+
+    GridBounds bounds;
+    bounds.minX = std::max(0, minX - 1);
+    bounds.maxX = std::min(m_width - 1, maxX + 1);
+    bounds.minY = std::max(0, minY - 1);
+    bounds.maxY = std::min(m_height - 1, maxY + 1);
+    return bounds;
 }

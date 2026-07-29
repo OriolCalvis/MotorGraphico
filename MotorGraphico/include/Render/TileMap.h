@@ -4,9 +4,12 @@
 #include <vector>
 
 #include "Core/Errors/Result.h"
+#include "Core/Math/GridBounds.h"
 #include "Core/Math/GridCoord.h"
 #include "Core/Math/Vector2.h"
 #include "Render/Tile.h"
+
+class Camera;
 
 // Mapa de tiles cargado desde TMX (formato de Tiled, XML). Varias capas
 // (m_layers[layer][y][x]) para separar fondo/props/colision (Fase 2 del
@@ -31,6 +34,8 @@ public:
 
     int getWidth() const { return m_width; }
     int getHeight() const { return m_height; }
+    int getTileWidth() const { return m_tileWidth; }
+    int getTileHeight() const { return m_tileHeight; }
     int getLayerCount() const { return static_cast<int>(m_layers.size()); }
 
     // Lanza std::out_of_range si layer/x/y estan fuera de rango: un
@@ -42,6 +47,22 @@ public:
 
     GridCoord screenToGrid(const Vector2& screenPos) const;
     Vector2 gridToScreen(const GridCoord& grid) const;
+
+    // Rango de celdas [minX..maxX]x[minY..maxY] que intersecta el
+    // viewport actual de "camera" (mas 1 celda de margen, para no dejar
+    // huecos en los bordes por redondeo), acotado a los limites del
+    // mapa. IsometricRenderer::renderLayer() itera solo este rango en
+    // vez del mapa entero (Fase 2, "Culling y batching estatico"): para
+    // un mapa grande, evita recorrer/dibujar miles de celdas fuera de
+    // pantalla en cada frame.
+    //
+    // La transformacion mundo->grid es una cizalla (isometrica), asi que
+    // el rectangulo del viewport en espacio mundo NO se corresponde con
+    // un rectangulo en espacio grid: se convierten las 4 esquinas y se
+    // toma el rectangulo delimitador de las 4 (por eso el resultado
+    // puede incluir alguna celda realmente fuera de pantalla, nunca al
+    // reves -- es una sobre-aproximacion segura, no un recorte exacto).
+    GridBounds visibleRange(const Camera& camera) const;
 
 private:
     void parseOrThrow(const std::string& path);

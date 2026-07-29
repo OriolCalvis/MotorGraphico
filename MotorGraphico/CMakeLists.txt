@@ -57,30 +57,39 @@ target_link_libraries(demo_camera PRIVATE motor_math)
 set(GLAD_DIR ${CMAKE_SOURCE_DIR}/third_party/glad)
 set(STB_DIR ${CMAKE_SOURCE_DIR}/third_party/stb)
 
-# --- Fase 2: TileMap/Tile/TextureAtlas (mapas y tiles). Necesitan
+# --- Fase 2: TileMap/Tile/TextureAtlas (mapas y tiles). Solo necesitan
 # tinyxml2 (vendorizado en third_party/, igual que GLAD/stb_image: XML de
 # un solo .h/.cpp, mas simple vendorizarlo que un FetchContent) para
-# parsear TMX, y GLAD (Texture.cpp, para el destructor RAII) porque
-# TextureAtlas guarda un Texture* -- pero NO GLFW: no crean ninguna
-# ventana ni contexto real, así que se pueden compilar y probar sin X11
-# ni Xvfb (Texture con glID=0 nunca llega a llamar a una funcion GL de
-# verdad, ver demo_tilemap.cpp). ---
+# parsear TMX, y motor_math (Camera, para TileMap::visibleRange). Nada de
+# GLAD ni GLFW: TextureAtlas solo usa los getters inline de Texture.h
+# (ancho/alto), no su implementacion .cpp (que si necesita GLAD). Por eso
+# se pueden compilar y probar sin X11 ni Xvfb (ver demo_tilemap.cpp). ---
 set(TINYXML2_DIR ${CMAKE_SOURCE_DIR}/third_party/tinyxml2)
 
+add_library(motor_map
+    src/Core/Resources/TextureAtlas.cpp
+    src/Render/TileMap.cpp
+    ${TINYXML2_DIR}/tinyxml2.cpp
+)
+target_include_directories(motor_map PUBLIC ${TINYXML2_DIR})
+target_link_libraries(motor_map PUBLIC motor_math)
+
 if (EXISTS ${GLAD_DIR}/src/glad.c)
-    add_library(motor_map
+    # demo_tilemap.cpp SI construye un Texture real (aunque con glID=0,
+    # ver su comentario), asi que el ejecutable -- no motor_map -- es
+    # quien necesita Texture.cpp/glad.c. Mantenerlos fuera de motor_map
+    # evita compilarlos dos veces si algo linka motor_map junto a
+    # motor_core (que ya trae su propia copia), lo que daria simbolos
+    # duplicados en el enlazado.
+    add_executable(demo_tilemap
+        examples/demo_tilemap.cpp
         src/Core/Resources/Texture.cpp
-        src/Core/Resources/TextureAtlas.cpp
-        src/Render/TileMap.cpp
-        ${TINYXML2_DIR}/tinyxml2.cpp
         ${GLAD_DIR}/src/glad.c
     )
-    target_include_directories(motor_map PUBLIC ${TINYXML2_DIR} ${GLAD_DIR}/include)
-
-    add_executable(demo_tilemap examples/demo_tilemap.cpp)
+    target_include_directories(demo_tilemap PRIVATE ${GLAD_DIR}/include)
     target_link_libraries(demo_tilemap PRIVATE motor_map)
 else ()
-    message(STATUS "motor_map / demo_tilemap omitidos: falta third_party/glad.")
+    message(STATUS "demo_tilemap omitido: falta third_party/glad.")
 endif ()
 
 if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
@@ -113,6 +122,8 @@ if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
         src/Core/Resources/ShaderManager.cpp
         src/Engine/Window.cpp
         src/Render/SpriteBatch.cpp
+        src/Render/Entity.cpp
+        src/Render/IsometricRenderer.cpp
         ${GLAD_DIR}/src/glad.c
         ${CMAKE_BINARY_DIR}/stb_image_impl.cpp
     )
@@ -120,7 +131,11 @@ if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
         ${GLAD_DIR}/include
         ${STB_DIR}
     )
-    target_link_libraries(motor_core PUBLIC glfw glm::glm)
+    # motor_map (TileMap/TextureAtlas) publico: IsometricRenderer.h los
+    # expone en su propia interfaz publica, y no trae GLAD/GLFW consigo
+    # (ver comentario mas arriba), asi que no reintroduce ninguna
+    # dependencia nueva sobre motor_core.
+    target_link_libraries(motor_core PUBLIC glfw glm::glm motor_map)
 
     add_executable(sandbox_window examples/sandbox_window.cpp)
     target_link_libraries(sandbox_window PRIVATE motor_core)
@@ -129,6 +144,12 @@ if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
     # Texture/Shader (motor_core) y Camera (motor_math) a la vez.
     add_executable(demo_textured_quad examples/demo_textured_quad.cpp)
     target_link_libraries(demo_textured_quad PRIVATE motor_core motor_math)
+
+    # Fase 2 (culling) + Fase 3 (arranque): IsometricRenderer dibujando un
+    # TileMap culled + un par de entidades de prueba, con Painter's
+    # Algorithm real.
+    add_executable(demo_isometric_renderer examples/demo_isometric_renderer.cpp)
+    target_link_libraries(demo_isometric_renderer PRIVATE motor_core motor_math)
 else ()
     message(STATUS
         "motor_core / sandbox_window omitidos: falta third_party/glad y/o "

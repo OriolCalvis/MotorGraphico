@@ -6,6 +6,7 @@
 // glDeleteTextures) para probar la aritmetica de TextureAtlas.
 #include "Core/Resources/TextureAtlas.h"
 #include "Core/Resources/Texture.h"
+#include "Render/Camera.h"
 #include "Render/TileMap.h"
 
 #include <cassert>
@@ -16,6 +17,15 @@
 namespace {
 
 bool nearlyEqual(float a, float b, float epsilon = 0.0001f) { return std::fabs(a - b) <= epsilon; }
+
+// Camera solo expone move()+update() (paneo suavizado): para posicionarla
+// exactamente en un punto en un test, hay que dejar que el lerp converja.
+void placeCameraAt(Camera& camera, const Vector2& target) {
+    camera.move(target - camera.position());
+    for (int i = 0; i < 300 && !nearlyEqual(camera.position().x, target.x, 0.01f); ++i) {
+        camera.update(1.0f / 60.0f);
+    }
+}
 
 }  // namespace
 
@@ -104,6 +114,27 @@ int main() {
 
     std::cout << "[ATLAS] region(1) = (" << uv1.u0 << ", " << uv1.v0 << ")-(" << uv1.u1 << ", "
               << uv1.v1 << "); region(2).u0 = " << uv2.u0 << " (esperado: 0.5)\n";
+
+    // Caso 8: TileMap::visibleRange() (culling, Fase 2 "Culling y
+    // batching estatico"). Con un viewport enorme centrado en el mapa,
+    // el rango visible debe cubrir el mapa entero (4x3).
+    Camera wideCamera(4000, 4000);
+    GridBounds fullRange = map.visibleRange(wideCamera);
+    assert(!fullRange.isEmpty());
+    assert(fullRange.minX == 0 && fullRange.maxX == map.getWidth() - 1);
+    assert(fullRange.minY == 0 && fullRange.maxY == map.getHeight() - 1);
+    std::cout << "[CULL] viewport grande: rango visible = [" << fullRange.minX << ".."
+              << fullRange.maxX << "]x[" << fullRange.minY << ".." << fullRange.maxY
+              << "] (esperado: [0..3]x[0..2], el mapa entero)\n";
+
+    // Con un viewport pequeno bien lejos del mapa, no hay interseccion:
+    // rango vacio (nada que dibujar esa capa).
+    Camera farCamera(800, 600);
+    placeCameraAt(farCamera, Vector2{100000.0f, 100000.0f});
+    GridBounds emptyRange = map.visibleRange(farCamera);
+    assert(emptyRange.isEmpty());
+    std::cout << "[CULL] camara lejos del mapa: rango vacio = " << emptyRange.isEmpty()
+              << " (esperado: 1)\n";
 
     std::cout << "\nTodas las comprobaciones (assert) han pasado correctamente.\n";
     return 0;

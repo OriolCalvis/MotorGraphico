@@ -28,6 +28,8 @@ public:
 
     const Vector2& position() const { return m_position; }
     float zoom() const { return m_zoom; }
+    int viewportWidth() const { return m_viewportWidth; }
+    int viewportHeight() const { return m_viewportHeight; }
 
     // Matriz combinada vista*proyeccion para el shader (mundo -> NDC).
     // Y invertida a proposito: en este motor "abajo en pantalla" = +y en

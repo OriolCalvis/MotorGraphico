@@ -3,9 +3,11 @@
 Implementación de `Core::Resources::ResourceManager<T>` y sus dependencias
 (`Result<T>`, `EngineException`), la **Fase 1 completa del Gantt**
 (ventana + contexto OpenGL, cámara ortográfica, proyección isométrica y
-quad texturizado con `GL_NEAREST`) y la mayor parte de la **Fase 2**
-(carga de atlas de tiles, capas de mapa, parser de mapas TMX), siguiendo
-el diagrama de clases del motor (`motor_grafico_clases.puml`).
+quad texturizado con `GL_NEAREST`), la **Fase 2 completa** (carga de
+atlas de tiles, capas de mapa, parser de mapas TMX, culling) y el
+arranque de la **Fase 3** (`IRenderable`/`IUpdatable`, `Entity`,
+`IsometricRenderer` con Painter's Algorithm), siguiendo el diagrama de
+clases del motor (`motor_grafico_clases.puml`).
 
 ## Estructura
 
@@ -16,6 +18,7 @@ include/Core/Math/Vector2.h             Vector2, del diagrama de clases
 include/Core/Math/GridCoord.h           Coordenada entera de grid
 include/Core/Math/UVRect.h              Region UV de un atlas
 include/Core/Math/IsoMath.h             Proyeccion isometrica 2:1 (grid<->screen), sin GL
+include/Core/Math/GridBounds.h          Rango [minX..maxX]x[minY..maxY], para culling
 include/Core/Errors/EngineException.h   Jerarquía de excepciones del motor
 include/Core/Errors/Result.h            Result<T>, para operaciones recuperables
 include/Core/Resources/ResourceManager.h  Template base genérico
@@ -23,12 +26,16 @@ include/Core/Resources/Texture.h        Wrapper RAII de textura GL
 include/Core/Resources/TextureManager.h ResourceManager<Texture>
 include/Core/Resources/Shader.h         Wrapper RAII de programa GLSL
 include/Core/Resources/ShaderManager.h  ResourceManager<Shader>
+include/Core/Resources/TextureAtlas.h   Recorta subregiones (UVRect) de un atlas de tiles
 include/Engine/Window.h                 Ventana + contexto OpenGL 3.3 (GLFW+GLAD)
 include/Render/Camera.h                 Camara ortografica: paneo suavizado, zoom, iso (solo glm)
 include/Render/SpriteBatch.h            Agrupa quads texturizados en un VBO, minimiza draw calls
 include/Render/Tile.h                   Celda de TileMap: GID, colision, variante
-include/Render/TileMap.h                Mapa de tiles cargado desde TMX (Tiled), varias capas
-include/Core/Resources/TextureAtlas.h   Recorta subregiones (UVRect) de un atlas de tiles
+include/Render/TileMap.h                Mapa de tiles cargado desde TMX (Tiled), varias capas, culling
+include/Render/IRenderable.h            Interfaz: render(SpriteBatch&) + getSortKey()
+include/Render/IUpdatable.h             Interfaz: update(deltaTime)
+include/Render/Entity.h                 Objeto dibujable en el grid (base de Player/Enemy futuros)
+include/Render/IsometricRenderer.h      Orquesta un frame: TileMap culled + cola de Entity ordenada
 
 src/Core/Resources/Texture.cpp
 src/Core/Resources/TextureManager.cpp
@@ -39,6 +46,8 @@ src/Engine/Window.cpp
 src/Render/Camera.cpp
 src/Render/SpriteBatch.cpp
 src/Render/TileMap.cpp
+src/Render/Entity.cpp
+src/Render/IsometricRenderer.cpp
 
 examples/TextAsset.h              Recurso de prueba sin dependencias gráficas
 examples/TextAssetManager.h/.cpp  ResourceManager<TextAsset>
@@ -46,9 +55,10 @@ examples/demo_resource_manager.cpp  Demo/test ejecutable (sin GL)
 examples/demo_camera.cpp             Demo/test de Camera + IsoMath (sin GL, solo glm)
 examples/sandbox_window.cpp          Demo de Window: abre ventana y pinta un color
 examples/demo_textured_quad.cpp      Fase 1 completa: Window+Camera+SpriteBatch dibujando un quad
-examples/demo_tilemap.cpp            Fase 2: TileMap+TextureAtlas sobre un TMX real (sin GL)
+examples/demo_tilemap.cpp            Fase 2: TileMap+TextureAtlas+culling sobre un TMX real (sin GL)
+examples/demo_isometric_renderer.cpp Fase 3 (arranque): IsometricRenderer, TileMap+Entity+sortQueue
 
-assets/shaders/sprite.{vert,frag}    Shader minimo de demo_textured_quad
+assets/shaders/sprite.{vert,frag}    Shader minimo de demo_textured_quad/demo_isometric_renderer
 assets/textures/test_checker.png     Textura de prueba (8x8, tablero rojo/amarillo)
 assets/maps/test_map.tmx             Mapa TMX de prueba (4x3, 1 capa, colision en 2 celdas)
 assets/maps/test_map_invalid.tmx     Fixture de TMX invalido, para probar Result::Error
@@ -109,6 +119,24 @@ ubicados en `.github/workflows/` en la raíz. Ver `../BRANCHING.md`.
   crashear. `TextureAtlas::defineRegion()`/`getUV()` verificados sobre
   un atlas 16×8 con dos regiones de 8×8. Limpio con ASan+UBSan
   (detección de fugas activada: aquí sí, no toca GL de verdad).
+  `TileMap::visibleRange()` (culling, la última tarea de la Fase 2)
+  también verificado en `demo_tilemap.cpp`: un viewport enorme centrado
+  en el mapa cubre las 4×3 celdas exactas, y una cámara muy lejos del
+  mapa da un rango vacío (`GridBounds::isEmpty()`).
+- **`IRenderable`/`IUpdatable`, `Entity` e `IsometricRenderer` (arranque
+  de la Fase 3) están compilados y ejecutados con un contexto OpenGL
+  real** (`demo_isometric_renderer.cpp`, sobre Xvfb): dibuja
+  `assets/maps/test_map.tmx` completo (con culling real vía
+  `TileMap::visibleRange()`) más tres entidades de prueba, y el
+  framebuffer final se inspeccionó pixel a pixel (fondo en las esquinas,
+  colores de la textura presentes en el resto) para confirmar que se
+  dibuja de verdad. `IsometricRenderer::sortQueue()` (Painter's
+  Algorithm) se verifica aparte, sin necesitar un frame de render: tres
+  entidades se insertan fuera de orden y, tras `sortQueue()`,
+  `renderQueue()` queda ordenada por profundidad ascendente exactamente
+  como predice la fórmula `(grid_x+grid_y)*tileHeight/2` del diagrama de
+  clases. `glGetError()` limpio tras el render. Limpio con ASan+UBSan
+  (mismo caso de `detect_leaks=0` que `demo_textured_quad`, por Mesa).
 
 ### Corrección aplicada: bug de move-semantics en `Texture`
 
@@ -134,9 +162,10 @@ cmake ..
 cmake --build .
 ./demo_resource_manager
 ./demo_camera
-./demo_tilemap             # sin GL real: no necesita Xvfb
-./sandbox_window           # ventana interactiva: se cierra a mano
-./demo_textured_quad       # ventana interactiva: se cierra a mano
+./demo_tilemap              # sin GL real: no necesita Xvfb
+./sandbox_window            # ventana interactiva: se cierra a mano
+./demo_textured_quad        # ventana interactiva: se cierra a mano
+./demo_isometric_renderer   # ventana interactiva: se cierra a mano
 ```
 
 `demo_camera` y `sandbox_window`/`demo_textured_quad` (via `motor_core`)
@@ -154,15 +183,16 @@ g++ -std=c++17 -Wall -Wextra -Iinclude -o demo examples/demo_resource_manager.cp
 
 ### Sin display (CI, contenedores, SSH sin X)
 
-`demo_textured_quad` acepta un número de frames como argumento: corre
-exactamente esos frames, vuelca el framebuffer a
-`demo_textured_quad_output.ppm` y sale solo, sin esperar a que se cierre
-la ventana — así es como lo ejecuta `ci.yml`. Con `Xvfb` (pantalla
+`demo_textured_quad` y `demo_isometric_renderer` aceptan un número de
+frames como argumento: corren exactamente esos frames, vuelcan el
+framebuffer a un PPM y salen solos, sin esperar a que se cierre la
+ventana — así es como los ejecuta `ci.yml`. Con `Xvfb` (pantalla
 virtual) y renderizado por software:
 
 ```
 sudo apt install xvfb
 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a ./build/demo_textured_quad 5
+LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a ./build/demo_isometric_renderer 5
 ```
 
 ### GLAD/stb_image/tinyxml2 vendorizados
@@ -194,21 +224,33 @@ el modelo de ramas y el versionado.
 
 ## Próximo paso sugerido
 
-**Fase 1 del Gantt completa**: las cuatro tareas (ventana + contexto
+**Fase 1 y Fase 2 del Gantt completas.** Fase 1: ventana + contexto
 OpenGL, cámara ortográfica, grid isométrico de prueba, quad texturizado
-con `GL_NEAREST`) están implementadas y verificadas end-to-end en
-`demo_textured_quad.cpp`.
+con `GL_NEAREST` (`demo_textured_quad.cpp`). Fase 2: `ResourceManager<T>`
+(ya existía), carga de atlas de tiles (`TextureAtlas`), sistema de capas
+del mapa (`TileMap::m_layers`), parser de mapas TMX
+(`TileMap::loadFromFile`, vía tinyxml2) y culling/batching estático
+(`TileMap::visibleRange()`) — todo verificado en `demo_tilemap.cpp` y
+`demo_isometric_renderer.cpp`.
 
-**Fase 2 (`motor_grafico_gantt.puml`): 4 de 5 tareas hechas.**
-`ResourceManager<T>` (ya existía), `Carga de atlas de tiles`
-(`TextureAtlas`), `Sistema de capas del mapa` (`TileMap::m_layers`,
-varias capas) y `Parser de mapas TMX` (`TileMap::loadFromFile`, vía
-tinyxml2) — todo verificado en `demo_tilemap.cpp`.
+**Fase 3 (`motor_grafico_gantt.puml`): arrancada, no completa.** Hecho:
+`IRenderable`/`IUpdatable`, `Entity` (base; `render()`/`getSortKey()`
+implementados, `update()` pendiente por diseño) e `IsometricRenderer`
+(cola de render, `sortQueue()` con Painter's Algorithm real, culling
+aplicado en `renderLayer()`), todo verificado en
+`demo_isometric_renderer.cpp` con un contexto OpenGL real.
 
-Queda **`Culling y batching estatico`**: dado un `Camera` (viewport +
-posición) y un `TileMap`, calcular el rango de celdas visible para no
-recorrer/dibujar el mapa entero cada frame. Es la pieza que conecta
-`TileMap`+`TextureAtlas` con el renderizado real (`SpriteBatch`), así que
-tiene sentido abordarla junto con el arranque de la Fase 3
-(`IsometricRenderer`, `Sprite batching dinámico`, `Painter's Algorithm`
-— todos ya en `motor_grafico_clases.puml`), en vez de aislada.
+Quedan de la Fase 3:
+
+- **`AnimatedEntity`/`Player`/`Enemy`** (jerarquía de `Entity`,
+  `motor_grafico_clases.puml`): animación por frames
+  (`addAnimation()`/`play()`), inventario/salud de `Player`, IA básica de
+  `Enemy`. `TestProp` en `demo_isometric_renderer.cpp` es solo un stub de
+  prueba, no una entidad real del motor.
+- **Sprite batching dinámico**: hoy `SpriteBatch` sube todo el buffer con
+  `glBufferData` en cada `flush()` (ver su comentario de rendimiento);
+  para muchas entidades moviéndose cada frame convendría orphaning o
+  buffer persistente.
+- **`IsometricRenderer::applyPostProcessing()`** sigue siendo un stub
+  documentado (efectos van en la Fase 4: iluminación, niebla de guerra,
+  paletizado — `motor_grafico_dafo.md`).
