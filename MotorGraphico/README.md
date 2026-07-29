@@ -1,10 +1,13 @@
 # Motor Gráfico Isométrico Pixel Art (C++)
 
 Implementación de `Core::Resources::ResourceManager<T>` y sus dependencias
-(`Result<T>`, `EngineException`), el arranque de la Fase 1 del Gantt
-(ventana + contexto OpenGL) y la cámara ortográfica + proyección
-isométrica de esa misma fase, siguiendo el diagrama de clases del motor
-(`motor_grafico_clases.puml`).
+(`Result<T>`, `EngineException`), la **Fase 1 completa del Gantt**
+(ventana + contexto OpenGL, cámara ortográfica, proyección isométrica y
+quad texturizado con `GL_NEAREST`), la **Fase 2 completa** (carga de
+atlas de tiles, capas de mapa, parser de mapas TMX, culling) y el
+arranque de la **Fase 3** (`IRenderable`/`IUpdatable`, `Entity`,
+`IsometricRenderer` con Painter's Algorithm), siguiendo el diagrama de
+clases del motor (`motor_grafico_clases.puml`).
 
 ## Estructura
 
@@ -15,6 +18,7 @@ include/Core/Math/Vector2.h             Vector2, del diagrama de clases
 include/Core/Math/GridCoord.h           Coordenada entera de grid
 include/Core/Math/UVRect.h              Region UV de un atlas
 include/Core/Math/IsoMath.h             Proyeccion isometrica 2:1 (grid<->screen), sin GL
+include/Core/Math/GridBounds.h          Rango [minX..maxX]x[minY..maxY], para culling
 include/Core/Errors/EngineException.h   Jerarquía de excepciones del motor
 include/Core/Errors/Result.h            Result<T>, para operaciones recuperables
 include/Core/Resources/ResourceManager.h  Template base genérico
@@ -22,21 +26,46 @@ include/Core/Resources/Texture.h        Wrapper RAII de textura GL
 include/Core/Resources/TextureManager.h ResourceManager<Texture>
 include/Core/Resources/Shader.h         Wrapper RAII de programa GLSL
 include/Core/Resources/ShaderManager.h  ResourceManager<Shader>
+include/Core/Resources/TextureAtlas.h   Recorta subregiones (UVRect) de un atlas de tiles
 include/Engine/Window.h                 Ventana + contexto OpenGL 3.3 (GLFW+GLAD)
 include/Render/Camera.h                 Camara ortografica: paneo suavizado, zoom, iso (solo glm)
+include/Render/SpriteBatch.h            Agrupa quads texturizados en un VBO, minimiza draw calls
+include/Render/Tile.h                   Celda de TileMap: GID, colision, variante
+include/Render/TileMap.h                Mapa de tiles cargado desde TMX (Tiled), varias capas, culling
+include/Render/IRenderable.h            Interfaz: render(SpriteBatch&) + getSortKey()
+include/Render/IUpdatable.h             Interfaz: update(deltaTime)
+include/Render/Entity.h                 Objeto dibujable en el grid (base de Player/Enemy futuros)
+include/Render/IsometricRenderer.h      Orquesta un frame: TileMap culled + cola de Entity ordenada
 
 src/Core/Resources/Texture.cpp
 src/Core/Resources/TextureManager.cpp
+src/Core/Resources/TextureAtlas.cpp
 src/Core/Resources/Shader.cpp
 src/Core/Resources/ShaderManager.cpp
 src/Engine/Window.cpp
 src/Render/Camera.cpp
+src/Render/SpriteBatch.cpp
+src/Render/TileMap.cpp
+src/Render/Entity.cpp
+src/Render/IsometricRenderer.cpp
 
 examples/TextAsset.h              Recurso de prueba sin dependencias gráficas
 examples/TextAssetManager.h/.cpp  ResourceManager<TextAsset>
 examples/demo_resource_manager.cpp  Demo/test ejecutable (sin GL)
 examples/demo_camera.cpp             Demo/test de Camera + IsoMath (sin GL, solo glm)
 examples/sandbox_window.cpp          Demo de Window: abre ventana y pinta un color
+examples/demo_textured_quad.cpp      Fase 1 completa: Window+Camera+SpriteBatch dibujando un quad
+examples/demo_tilemap.cpp            Fase 2: TileMap+TextureAtlas+culling sobre un TMX real (sin GL)
+examples/demo_isometric_renderer.cpp Fase 3 (arranque): IsometricRenderer, TileMap+Entity+sortQueue
+
+assets/shaders/sprite.{vert,frag}    Shader minimo de demo_textured_quad/demo_isometric_renderer
+assets/textures/test_checker.png     Textura de prueba (8x8, tablero rojo/amarillo)
+assets/maps/test_map.tmx             Mapa TMX de prueba (4x3, 1 capa, colision en 2 celdas)
+assets/maps/test_map_invalid.tmx     Fixture de TMX invalido, para probar Result::Error
+
+third_party/glad/     GLAD (loader de OpenGL 3.3 Core), vendorizado y comprobado en el repo
+third_party/stb/      stb_image.h (carga de PNG/JPG...), vendorizado y comprobado en el repo
+third_party/tinyxml2/ tinyxml2 (parser XML, para TMX), vendorizado y comprobado en el repo
 
 ```
 
@@ -61,11 +90,53 @@ ubicados en `.github/workflows/` en la raíz. Ver `../BRANCHING.md`.
   de 41×41 celdas, convergencia del lerp de paneo, e inversa exacta de
   `screenToWorld()` para un zoom≠1. Limpio también con
   `-fsanitize=address,undefined`, `clang-format` y `clang-tidy`.
-- **`Texture`/`TextureManager`, `Shader`/`ShaderManager` y `Window` son código real** (llamadas GL reales vía GLAD, carga con `stb_image`,
-  compilación GLSL con log de error, contexto OpenGL 3.3 Core vía GLFW),
-  pero **siguen sin poder compilarse** porque requieren vendorizar GLAD y
-  stb_image a mano (ver más abajo) y no hay forma de crear un contexto
-  OpenGL real (display) en este entorno. Se revisaron a mano.
+- **`Texture`/`TextureManager`, `Shader`/`ShaderManager`, `Window`,
+  `SpriteBatch` y el quad texturizado completo están compilados,
+  enlazados y ejecutados con un contexto OpenGL 3.3 Core real**
+  (`demo_textured_quad.cpp`, sobre Xvfb + Mesa/llvmpipe software
+  rendering, ya que este entorno no tiene GPU/display): `GL_VERSION`
+  reportado es `4.5 (Core Profile) Mesa ...`; se carga
+  `assets/textures/test_checker.png` (8×8, confirmado por
+  `Texture::getWidth()/getHeight()`), se compila/enlaza
+  `assets/shaders/sprite.{vert,frag}`, y se vuelca el framebuffer final a
+  un PPM que se inspeccionó pixel a pixel: la esquina tiene el color de
+  `glClearColor` y el centro el color exacto de la textura — confirma que
+  el pipeline completo (Window → Camera → SpriteBatch → Shader →
+  Texture) dibuja lo que debería, no solo que "compila". Limpio con
+  ASan+UBSan (con `detect_leaks=0` solo para esta demo: las fugas que
+  reporta LeakSanitizer son de la cache interna de Mesa/llvmpipe — todos
+  los frames del stack están dentro del driver, no de este código).
+- **`TileMap` (parser TMX real vía tinyxml2), `Tile` y `TextureAtlas`
+  están compilados y ejecutados** (`demo_tilemap.cpp`, target
+  `motor_map`; necesita GLAD para el destructor de `Texture` pero NO
+  GLFW/ventana, así que corre sin Xvfb): carga
+  `assets/maps/test_map.tmx` (tileset embebido, capa CSV, colisión por
+  tile vía `<properties>`) y comprueba celda a celda GID y colisión;
+  `gridToScreen`/`screenToGrid` con el `tilewidth`/`tileheight` del
+  propio TMX; `getTile()` fuera de rango lanza `std::out_of_range`; un
+  TMX con menos celdas de las declaradas (`test_map_invalid.tmx`) y un
+  fichero inexistente devuelven `Result<bool>::Error` en vez de
+  crashear. `TextureAtlas::defineRegion()`/`getUV()` verificados sobre
+  un atlas 16×8 con dos regiones de 8×8. Limpio con ASan+UBSan
+  (detección de fugas activada: aquí sí, no toca GL de verdad).
+  `TileMap::visibleRange()` (culling, la última tarea de la Fase 2)
+  también verificado en `demo_tilemap.cpp`: un viewport enorme centrado
+  en el mapa cubre las 4×3 celdas exactas, y una cámara muy lejos del
+  mapa da un rango vacío (`GridBounds::isEmpty()`).
+- **`IRenderable`/`IUpdatable`, `Entity` e `IsometricRenderer` (arranque
+  de la Fase 3) están compilados y ejecutados con un contexto OpenGL
+  real** (`demo_isometric_renderer.cpp`, sobre Xvfb): dibuja
+  `assets/maps/test_map.tmx` completo (con culling real vía
+  `TileMap::visibleRange()`) más tres entidades de prueba, y el
+  framebuffer final se inspeccionó pixel a pixel (fondo en las esquinas,
+  colores de la textura presentes en el resto) para confirmar que se
+  dibuja de verdad. `IsometricRenderer::sortQueue()` (Painter's
+  Algorithm) se verifica aparte, sin necesitar un frame de render: tres
+  entidades se insertan fuera de orden y, tras `sortQueue()`,
+  `renderQueue()` queda ordenada por profundidad ascendente exactamente
+  como predice la fórmula `(grid_x+grid_y)*tileHeight/2` del diagrama de
+  clases. `glGetError()` limpio tras el render. Limpio con ASan+UBSan
+  (mismo caso de `detect_leaks=0` que `demo_textured_quad`, por Mesa).
 
 ### Corrección aplicada: bug de move-semantics en `Texture`
 
@@ -79,16 +150,28 @@ deja el origen en `m_glID = 0`, igual que `std::unique_ptr`.
 
 ## Compilar y ejecutar los demos verificados
 
+GLAD y stb_image ya están vendorizados en `third_party/` (comprobados en
+el repo, ver "GLAD/stb_image vendorizados" más abajo), así que
+`motor_core` se activa solo. En Linux hacen falta los headers de
+desarrollo de X11/GL que usa GLFW (`sudo apt install xorg-dev
+libgl1-mesa-dev`, o el equivalente de tu distro):
+
 ```
 mkdir build && cd build
 cmake ..
 cmake --build .
 ./demo_resource_manager
 ./demo_camera
+./demo_tilemap              # sin GL real: no necesita Xvfb
+./sandbox_window            # ventana interactiva: se cierra a mano
+./demo_textured_quad        # ventana interactiva: se cierra a mano
+./demo_isometric_renderer   # ventana interactiva: se cierra a mano
 ```
 
-`demo_camera` descarga `glm` vía `FetchContent` en la configuración de
-CMake (requiere red la primera vez; luego queda cacheado en `build/`).
+`demo_camera` y `sandbox_window`/`demo_textured_quad` (via `motor_core`)
+descargan `glm` y `GLFW` respectivamente vía `FetchContent` en la
+configuración de CMake (requiere red la primera vez; luego queda
+cacheado en `build/`).
 
 Sin `cmake` a mano, `demo_resource_manager` también compila directo (no
 tiene dependencias externas):
@@ -98,36 +181,38 @@ g++ -std=c++17 -Wall -Wextra -Iinclude -o demo examples/demo_resource_manager.cp
 ./demo
 ```
 
-## Activar `motor_core` (Texture/Shader/Window) y `sandbox_window`
+### Sin display (CI, contenedores, SSH sin X)
 
-`CMakeLists.txt` los activa **automáticamente** en cuanto detecta:
-
-1. **GLAD**: generar en <https://glad.dav1d.de/> con Language=C/C++,
-   Specification=OpenGL, API gl=3.3, Profile=Core. Descomprimir en
-   `third_party/glad/` de forma que quede
-   `third_party/glad/include/glad/glad.h`,
-   `third_party/glad/include/KHR/khrplatform.h`,
-   `third_party/glad/src/glad.c`.
-2. **stb_image**: descargar
-   <https://raw.githubusercontent.com/nothings/stb/master/stb_image.h>
-   en `third_party/stb/stb_image.h`.
-
-GLFW se descarga sola vía `FetchContent` (glm ya se resuelve siempre,
-lo use o no `motor_core`, ver más abajo). En cuanto los dos pasos
-anteriores estén hechos:
+`demo_textured_quad` y `demo_isometric_renderer` aceptan un número de
+frames como argumento: corren exactamente esos frames, vuelcan el
+framebuffer a un PPM y salen solos, sin esperar a que se cierre la
+ventana — así es como los ejecuta `ci.yml`. Con `Xvfb` (pantalla
+virtual) y renderizado por software:
 
 ```
-mkdir build && cd build
-cmake ..
-cmake --build .
-./sandbox_window
+sudo apt install xvfb
+LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a ./build/demo_textured_quad 5
+LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a ./build/demo_isometric_renderer 5
 ```
 
-`sandbox_window` abre una ventana 1280×720, crea el contexto OpenGL 3.3
-Core y pinta un color de fondo sólido cada frame — es la validación
-mínima de la primera tarea de la Fase 1 ("Ventana + contexto OpenGL
-3.3"). Ver "Próximo paso sugerido" más abajo para lo que falta de esa
-fase.
+### GLAD/stb_image/tinyxml2 vendorizados
+
+`third_party/glad/`, `third_party/stb/` y `third_party/tinyxml2/` están
+en el repositorio (no son un paso manual de cada dev). Se generaron/
+descargaron una vez con:
+
+```
+pip install glad
+python -m glad --profile core --api "gl=3.3" --generator c --out-path third_party/glad
+curl -o third_party/stb/stb_image.h https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
+curl -o third_party/tinyxml2/tinyxml2.h https://raw.githubusercontent.com/leethomason/tinyxml2/master/tinyxml2.h
+curl -o third_party/tinyxml2/tinyxml2.cpp https://raw.githubusercontent.com/leethomason/tinyxml2/master/tinyxml2.cpp
+```
+
+Si algún día hace falta regenerarlos (nueva versión de OpenGL, otra API,
+actualizar tinyxml2), son esos comandos; `CMakeLists.txt` los detecta
+automáticamente por la presencia de `third_party/glad/src/glad.c` y
+`third_party/stb/stb_image.h`, sin tocar el propio `CMakeLists.txt`.
 
 ## CI/CD
 
@@ -139,12 +224,33 @@ el modelo de ramas y el versionado.
 
 ## Próximo paso sugerido
 
-De las cuatro tareas de la Fase 1 del Gantt, quedan:
+**Fase 1 y Fase 2 del Gantt completas.** Fase 1: ventana + contexto
+OpenGL, cámara ortográfica, grid isométrico de prueba, quad texturizado
+con `GL_NEAREST` (`demo_textured_quad.cpp`). Fase 2: `ResourceManager<T>`
+(ya existía), carga de atlas de tiles (`TextureAtlas`), sistema de capas
+del mapa (`TileMap::m_layers`), parser de mapas TMX
+(`TileMap::loadFromFile`, vía tinyxml2) y culling/batching estático
+(`TileMap::visibleRange()`) — todo verificado en `demo_tilemap.cpp` y
+`demo_isometric_renderer.cpp`.
 
-- ~~Ventana + contexto OpenGL 3.3~~ (`Window`)
-- ~~Cámara ortográfica con desplazamiento~~ (`Camera`, este cambio)
-- ~~Grid isométrico de prueba~~ (`IsoMath`, verificado en `demo_camera.cpp`)
-- **Quad texturizado con `GL_NEAREST`** — el único paso que sí necesita un
-  contexto OpenGL real (`Texture`/`Shader`/`Window` ya existen; falta
-  `SpriteBatch::submit()`/`flush()` del diagrama de clases y vendorizar
-  GLAD + stb_image, ver más abajo).
+**Fase 3 (`motor_grafico_gantt.puml`): arrancada, no completa.** Hecho:
+`IRenderable`/`IUpdatable`, `Entity` (base; `render()`/`getSortKey()`
+implementados, `update()` pendiente por diseño) e `IsometricRenderer`
+(cola de render, `sortQueue()` con Painter's Algorithm real, culling
+aplicado en `renderLayer()`), todo verificado en
+`demo_isometric_renderer.cpp` con un contexto OpenGL real.
+
+Quedan de la Fase 3:
+
+- **`AnimatedEntity`/`Player`/`Enemy`** (jerarquía de `Entity`,
+  `motor_grafico_clases.puml`): animación por frames
+  (`addAnimation()`/`play()`), inventario/salud de `Player`, IA básica de
+  `Enemy`. `TestProp` en `demo_isometric_renderer.cpp` es solo un stub de
+  prueba, no una entidad real del motor.
+- **Sprite batching dinámico**: hoy `SpriteBatch` sube todo el buffer con
+  `glBufferData` en cada `flush()` (ver su comentario de rendimiento);
+  para muchas entidades moviéndose cada frame convendría orphaning o
+  buffer persistente.
+- **`IsometricRenderer::applyPostProcessing()`** sigue siendo un stub
+  documentado (efectos van en la Fase 4: iluminación, niebla de guerra,
+  paletizado — `motor_grafico_dafo.md`).

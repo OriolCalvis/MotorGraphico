@@ -3,9 +3,6 @@ build/
 build-*/
 out/
 
-# third_party vendorizado (GLAD/stb_image), ver MotorGraphico/CMakeLists.txt
-MotorGraphico/third_party/
-
 # IDE / editores
 .vscode/
 .idea/
@@ -14,3 +11,6 @@ MotorGraphico/third_party/
 # Artefactos de release.yml
 motor-iso-*.tar.gz
 motor-iso-*.zip
+
+# Volcado de framebuffer de demo_textured_quad (verificacion manual)
+*.ppm

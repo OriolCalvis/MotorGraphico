@@ -1,3 +1,6 @@
+# -performance-no-int-to-ptr: (void*)offsetof(...) es el idiom estandar
+# de glVertexAttribPointer (ver SpriteBatch.cpp), sin alternativa mas
+# "segura" en la API de OpenGL; el check no aporta nada aqui.
 ---
 Checks: >
   -*,
@@ -13,8 +16,9 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
   -readability-uppercase-literal-suffix,
-  -readability-convert-member-functions-to-static
+  -readability-convert-member-functions-to-static,
+  -performance-no-int-to-ptr
 
 WarningsAsErrors: ''
-HeaderFilterRegex: '(include|examples)/.*'
+HeaderFilterRegex: '.*/MotorGraphico/(include|examples)/.*'
 FormatStyle: file
