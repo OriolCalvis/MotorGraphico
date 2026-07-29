@@ -47,8 +47,8 @@ Tags ligeros para hitos internos que no son releases públicos (no disparan `rel
 El código real del proyecto vive en el subdirectorio [`MotorGraphico/`](MotorGraphico/); ambos workflows operan con `working-directory: MotorGraphico`.
 
 - **`ci.yml`** — en cada push/PR a `develop`/`main`, diariamente contra `develop` (cron) y manualmente (`workflow_dispatch`):
-  - `build-test`: matriz Debug/Release × g++/clang++. Compila con `CMAKE_EXPORT_COMPILE_COMMANDS=ON` y ejecuta `demo_resource_manager` (hoy el único binario real del proyecto, ver `MotorGraphico/README.md`). En Debug+g++ añade una pasada con ASan+UBSan.
-  - `static-analysis`: `clang-format --dry-run --Werror` (bloqueante), `clang-tidy` **solo sobre los ficheros presentes en `compile_commands.json`** (así no falla sobre `Texture.cpp`/`Shader.cpp`, que aún dependen de GLAD/stb_image/glm sin vendorizar — ver `MotorGraphico/CMakeLists.txt`), y `cppcheck`.
+  - `build-test`: matriz Debug/Release × g++/clang++. Instala `xorg-dev libgl1-mesa-dev xvfb` (GLFW/motor_core los necesitan), compila con `CMAKE_EXPORT_COMPILE_COMMANDS=ON` y ejecuta `demo_resource_manager`, `demo_camera` y `demo_textured_quad` (este último bajo `xvfb-run` + `LIBGL_ALWAYS_SOFTWARE=1`: abre una ventana/contexto OpenGL real sobre una pantalla virtual, corre un número fijo de frames — ver `MotorGraphico/README.md` — y vuelca el framebuffer). En Debug+g++ añade una pasada con ASan+UBSan (con `ASAN_OPTIONS=detect_leaks=0` solo para `demo_textured_quad`: LeakSanitizer marca como fuga la cache interna de Mesa/llvmpipe, no código del proyecto).
+  - `static-analysis`: `clang-format --dry-run --Werror` (bloqueante), `clang-tidy` **solo sobre los ficheros propios en `compile_commands.json`** (excluye `build/_deps/` y `third_party/`, dependencias de terceros que no queremos lintar), y `cppcheck` (sin `-I` a `third_party/`, por el mismo motivo: no es código nuestro).
 - **`release.yml`** — al empujar un tag `v*`: compila Release en Linux y Windows, empaqueta (`motor-iso-<tag>-linux.tar.gz` / `...-win64.zip`) y publica el artefacto en la sección Releases de GitHub. Marca `prerelease` automáticamente si el tag contiene `-alpha`, `-beta` o `-rc`.
 
 ### Reglas de merge
@@ -77,9 +77,8 @@ pip install pre-commit
 pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-## 6. Cuándo activar lo que aún está comentado
+## 6. GLAD y stb_image
 
-`MotorGraphico/CMakeLists.txt` detecta automáticamente `third_party/glad` y `third_party/stb`: en cuanto existan, activa el target `motor_core` (Texture/Shader/Window) sin tocar nada más.
+`MotorGraphico/third_party/{glad,stb}` están vendorizados en el repositorio (no son un paso manual de cada dev): en cuanto `CMakeLists.txt` los detecta, activa el target `motor_core` (Texture/Shader/Window/SpriteBatch) automáticamente. Se generaron una vez con `pip install glad && python -m glad --profile core --api "gl=3.3" --generator c --out-path third_party/glad` y descargando `stb_image.h`; ver `MotorGraphico/README.md` para el detalle si hay que regenerarlos.
 
-- `ci.yml` lo recogerá automáticamente (compila lo que haya en `CMakeLists.txt`, sin cambios en el workflow).
-- `release.yml` necesitará actualizarse para empaquetar el binario real de la aplicación (hoy solo empaqueta `demo_resource_manager`) junto con los assets mínimos, y `sandbox_window` en cuanto exista.
+`release.yml` todavía necesita actualizarse para empaquetar el binario real de la aplicación (hoy solo empaqueta `demo_resource_manager`) en cuanto exista un ejecutable jugable, más allá de las demos de verificación.

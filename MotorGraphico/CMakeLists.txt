@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(MotorGraficoIsometrico CXX)
+project(MotorGraficoIsometrico CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,27 +37,23 @@ target_link_libraries(demo_camera PRIVATE motor_math)
 # GLFW se descarga sola via FetchContent (tiene soporte CMake oficial,
 # sin pasos manuales); glm ya se resolvio arriba.
 #
-# GLAD y stb_image NO se pueden automatizar del todo: GLAD requiere un
-# paso de generacion (no es un simple "git clone") y stb_image es un
-# header-only que hay que descargar una vez. Pasos manuales, una sola
-# vez, antes de poder compilar motor_core:
+# GLAD y stb_image estan vendorizados en third_party/ (comprobados en el
+# repositorio, no son un paso manual): GLAD no tiene soporte CMake
+# oficial tipo FetchContent (requiere un paso de generacion desde su XML
+# de especificacion) y stb_image es header-only. Se generaron una vez
+# con:
 #
-#   1) GLAD: ir a https://glad.dav1d.de/, generador con
-#      Language=C/C++, Specification=OpenGL, API gl=3.3, Profile=Core.
-#      Descomprimir el zip resultante dentro de third_party/glad/ de
-#      forma que quede: third_party/glad/include/glad/glad.h,
-#      third_party/glad/include/KHR/khrplatform.h,
-#      third_party/glad/src/glad.c
+#   pip install glad
+#   python -m glad --profile core --api "gl=3.3" --generator c \
+#       --out-path third_party/glad
+#   curl -o third_party/stb/stb_image.h \
+#       https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 #
-#   2) stb_image: descargar
-#      https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
-#      y guardarlo en third_party/stb/stb_image.h
-#      (el propio proyecto necesita un .cpp que haga
-#       #define STB_IMAGE_IMPLEMENTATION antes de incluirlo una unica
-#       vez; ver third_party/stb_image_impl.cpp mas abajo).
-#
-# En cuanto esas dos carpetas existan, "cmake .." detecta motor_core
-# automaticamente: no hace falta tocar este fichero.
+# (el propio proyecto necesita un .cpp que haga
+#  #define STB_IMAGE_IMPLEMENTATION antes de incluir stb_image.h una
+#  unica vez; ver stb_image_impl.cpp mas abajo). El "if" de abajo se deja
+# como red de seguridad (por si alguien borra third_party/ a mano), no
+# como paso esperado.
 
 set(GLAD_DIR ${CMAKE_SOURCE_DIR}/third_party/glad)
 set(STB_DIR ${CMAKE_SOURCE_DIR}/third_party/stb)
@@ -66,6 +62,11 @@ if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    if (UNIX AND NOT APPLE)
+        # Solo X11: evita depender de wayland-client/xkbcommon (no
+        # instalados por defecto en CI) cuando solo hace falta X11/Xvfb.
+        set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+    endif ()
     FetchContent_Declare(
         glfw
         GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -86,6 +87,7 @@ if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
         src/Core/Resources/Shader.cpp
         src/Core/Resources/ShaderManager.cpp
         src/Engine/Window.cpp
+        src/Render/SpriteBatch.cpp
         ${GLAD_DIR}/src/glad.c
         ${CMAKE_BINARY_DIR}/stb_image_impl.cpp
     )
@@ -97,6 +99,13 @@ if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
 
     add_executable(sandbox_window examples/sandbox_window.cpp)
     target_link_libraries(sandbox_window PRIVATE motor_core)
+
+    # Fase 1, ultima tarea: quad texturizado con GL_NEAREST. Usa Window +
+    # Texture/Shader (motor_core) y Camera (motor_math) a la vez.
+    add_executable(demo_textured_quad examples/demo_textured_quad.cpp)
+    target_link_libraries(demo_textured_quad PRIVATE motor_core motor_math)
+
+    file(COPY ${CMAKE_SOURCE_DIR}/assets DESTINATION ${CMAKE_BINARY_DIR})
 else ()
     message(STATUS
         "motor_core / sandbox_window omitidos: falta third_party/glad y/o "
