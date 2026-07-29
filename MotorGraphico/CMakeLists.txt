@@ -13,10 +13,29 @@ add_executable(demo_resource_manager
     examples/TextAssetManager.cpp
 )
 
-# --- Fase 1 en adelante: necesitan GLFW + GLAD + stb_image + glm. ---
+# --- Camera + IsoMath: solo necesitan glm (header-only, sin GL). Se
+# separan de motor_core (que si necesita GLAD/stb_image/GLFW vendorizados,
+# ver mas abajo) para poder compilar y probar la camara y la proyeccion
+# isometrica sin ventana ni contexto OpenGL real. ---
+include(FetchContent)
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG 1.0.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(glm)
+
+add_library(motor_math src/Render/Camera.cpp)
+target_link_libraries(motor_math PUBLIC glm::glm)
+
+add_executable(demo_camera examples/demo_camera.cpp)
+target_link_libraries(demo_camera PRIVATE motor_math)
+
+# --- Fase 1 en adelante: ademas necesitan GLFW + GLAD + stb_image. ---
 #
-# GLFW y glm se descargan solos via FetchContent (ambos tienen soporte
-# CMake oficial, sin pasos manuales).
+# GLFW se descarga sola via FetchContent (tiene soporte CMake oficial,
+# sin pasos manuales); glm ya se resolvio arriba.
 #
 # GLAD y stb_image NO se pueden automatizar del todo: GLAD requiere un
 # paso de generacion (no es un simple "git clone") y stb_image es un
@@ -44,8 +63,6 @@ set(GLAD_DIR ${CMAKE_SOURCE_DIR}/third_party/glad)
 set(STB_DIR ${CMAKE_SOURCE_DIR}/third_party/stb)
 
 if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
-    include(FetchContent)
-
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -55,13 +72,7 @@ if (EXISTS ${GLAD_DIR}/src/glad.c AND EXISTS ${STB_DIR}/stb_image.h)
         GIT_TAG 3.4
         GIT_SHALLOW TRUE
     )
-    FetchContent_Declare(
-        glm
-        GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG 1.0.1
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(glfw glm)
+    FetchContent_MakeAvailable(glfw)
 
     # third_party/stb_image_impl.cpp: unico .cpp del proyecto donde se
     # define STB_IMAGE_IMPLEMENTATION (stb_image.h es header-only y esa

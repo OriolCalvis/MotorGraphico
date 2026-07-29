@@ -8,8 +8,7 @@
 // GLFW espera encontrar ya declarados.
 #include <GLFW/glfw3.h>
 
-Window::Window(int width, int height, const std::string& title)
-    : m_width(width), m_height(height) {
+Window::Window(int width, int height, const std::string& title) : m_width(width), m_height(height) {
     if (!glfwInit()) {
         throw EngineException("glfwInit() fallo: no se pudo inicializar GLFW");
     }
@@ -39,7 +38,7 @@ Window::Window(int width, int height, const std::string& title)
     }
 
     glViewport(0, 0, width, height);
-    glfwSwapInterval(1); // VSync activado por defecto.
+    glfwSwapInterval(1);  // VSync activado por defecto.
 }
 
 Window::~Window() {

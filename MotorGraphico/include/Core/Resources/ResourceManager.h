@@ -36,8 +36,7 @@ public:
         try {
             resource = loadFromDisk(path);
         } catch (const std::exception& e) {
-            return Result<T*>::Error(
-                "Excepcion durante loadFromDisk('" + path + "'): " + e.what());
+            return Result<T*>::Error("Excepcion durante loadFromDisk('" + path + "'): " + e.what());
         }
 
         if (!resource) {
@@ -46,6 +45,10 @@ public:
 
         T* rawPtr = resource.get();
         m_resources.emplace(id, std::move(resource));
+        // rawPtr sigue vivo: apunta al T* en el heap que ahora posee
+        // m_resources, no al unique_ptr local movido. cppcheck no
+        // distingue esto y lo marca como dangling; falso positivo.
+        // cppcheck-suppress returnDanglingLifetime
         return Result<T*>::Ok(rawPtr);
     }
 
@@ -55,9 +58,7 @@ public:
         return (it != m_resources.end()) ? it->second.get() : nullptr;
     }
 
-    bool contains(const std::string& id) const {
-        return m_resources.find(id) != m_resources.end();
-    }
+    bool contains(const std::string& id) const { return m_resources.find(id) != m_resources.end(); }
 
     void unload(const std::string& id) { m_resources.erase(id); }
     void clear() { m_resources.clear(); }
