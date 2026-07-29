@@ -53,6 +53,7 @@ jobs:
         run: |
           ./build/demo_resource_manager
           ./build/demo_camera
+          ./build/demo_tilemap
           # demo_textured_quad abre una ventana real (GLFW+GLAD): xvfb-run
           # le da un display virtual. "5" = corre 5 frames y sale solo
           # (ver examples/demo_textured_quad.cpp), no se queda colgado
@@ -74,12 +75,13 @@ jobs:
           cmake --build build-asan -j
           ./build-asan/demo_resource_manager
           ./build-asan/demo_camera
+          ./build-asan/demo_tilemap
           # detect_leaks=0 solo aqui: el propio driver Mesa/llvmpipe (no
           # nuestro codigo) reserva cache de shaders/JIT que vive hasta el
           # final del proceso y LeakSanitizer la marca como fuga (todos
           # los frames del stack son de libGL/llvmpipe, no de este
-          # proyecto). demo_resource_manager y demo_camera no tocan GL y
-          # se siguen comprobando con deteccion de fugas activada.
+          # proyecto). El resto de demos no tocan GL de verdad y se
+          # siguen comprobando con deteccion de fugas activada.
           ASAN_OPTIONS=detect_leaks=0 xvfb-run -a ./build-asan/demo_textured_quad 5
 
   static-analysis:
