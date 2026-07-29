@@ -33,9 +33,12 @@ examples/TextAssetManager.h/.cpp  ResourceManager<TextAsset>
 examples/demo_resource_manager.cpp  Demo/test ejecutable (sin GL)
 examples/sandbox_window.cpp          Demo de Window: abre ventana y pinta un color
 
-.github/workflows/ci.yml       (antes en la raíz: GitHub Actions solo ejecuta
-.github/workflows/release.yml   workflows dentro de .github/workflows/)
 ```
+
+`.github/workflows/{ci,release}.yml`, `.clang-format`, `.clang-tidy` y
+`.pre-commit-config.yaml` viven en la raíz del repositorio (un nivel por
+encima de este directorio), no aquí: GitHub Actions solo ejecuta workflows
+ubicados en `.github/workflows/` en la raíz. Ver `../BRANCHING.md`.
 
 ## Qué está verificado y qué no
 
@@ -109,10 +112,11 @@ ortográfica, grid isométrico de prueba) son el próximo paso.
 
 ## CI/CD
 
-`ci.yml` y `release.yml` estaban en la raíz del repositorio: GitHub
-Actions **solo** ejecuta workflows que viven en `.github/workflows/`, así
-que nunca se habían disparado. Se movieron a esa ruta sin cambiar su
-contenido. Ver `BRANCHING.md` para el detalle de qué hace cada uno.
+`ci.yml` y `release.yml` viven en `.github/workflows/` en la raíz del
+repositorio (GitHub Actions solo ejecuta workflows ubicados ahí) y operan
+con `working-directory: MotorGraphico` sobre este subdirectorio. Ver
+[`../BRANCHING.md`](../BRANCHING.md) para el detalle de qué hace cada uno,
+el modelo de ramas y el versionado.
 
 ## Próximo paso sugerido
 

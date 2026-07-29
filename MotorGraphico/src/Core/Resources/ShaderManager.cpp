@@ -15,7 +15,7 @@ std::string readFileOrThrow(const std::string& path) {
     ss << file.rdbuf();
     return ss.str();
 }
-} // namespace
+}  // namespace
 
 std::unique_ptr<Shader> ShaderManager::loadFromDisk(const std::string& path) {
     std::string vertexSource = readFileOrThrow(path + ".vert");

@@ -22,9 +22,9 @@ int main() {
     // (la ruta pasada aqui ni siquiera existe, y aun asi funciona).
     auto cached = manager.load("saludo", "ruta_que_no_existe.txt");
     assert(cached.isOk());
-    assert(cached.value() == result.value()); // mismo puntero: viene de cache
+    assert(cached.value() == result.value());  // mismo puntero: viene de cache
     std::cout << "[CACHE] count() tras segunda peticion = " << manager.count()
-               << " (esperado: 1)\n";
+              << " (esperado: 1)\n";
 
     // Caso 3: fichero inexistente -> Result::Error controlado, sin excepcion
     // visible para quien llama a load().
@@ -35,8 +35,8 @@ int main() {
     // Caso 4: get() / contains() / unload() / clear().
     TextAsset* ptr = manager.get("saludo");
     std::cout << "[GET] get(\"saludo\") != nullptr: " << (ptr != nullptr) << "\n";
-    std::cout << "[CONTAINS] contains(\"inexistente\") = "
-               << manager.contains("inexistente") << " (esperado: 0, el load fallido no cachea)\n";
+    std::cout << "[CONTAINS] contains(\"inexistente\") = " << manager.contains("inexistente")
+              << " (esperado: 0, el load fallido no cachea)\n";
 
     manager.unload("saludo");
     std::cout << "[UNLOAD] count() tras unload = " << manager.count() << " (esperado: 0)\n";

@@ -1,0 +1,16 @@
+# Directorios de build de CMake
+build/
+build-*/
+out/
+
+# third_party vendorizado (GLAD/stb_image), ver MotorGraphico/CMakeLists.txt
+MotorGraphico/third_party/
+
+# IDE / editores
+.vscode/
+.idea/
+*.swp
+
+# Artefactos de release.yml
+motor-iso-*.tar.gz
+motor-iso-*.zip
